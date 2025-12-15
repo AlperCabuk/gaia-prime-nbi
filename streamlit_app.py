@@ -9,20 +9,18 @@ from datetime import datetime, timedelta
 from google.api_core.exceptions import NotFound, InvalidArgument
 
 # ==============================================================================
-# 1. NBI ENGINE (ABICore Logic)
+# 1. NBI ENGINE (AGICore Logic)
 # ==============================================================================
 
 class KoopmanDynamicsEngine:
     """
-    ABICore (Alper-Based Intelligence) Mantığı.
-    Yeşil alan, beton ve su arasındaki etkileşimi matris tabanlı simüle eder.
+    AGICore (Alper-Based Intelligence) Mantığı.
     """
     def __init__(self):
-        # [Veg, Urban, Water] arası etkileşim matrisi
         self.K_matrix = np.array([
-            [0.98, -0.05, 0.01],  # Vegetation Dynamics
-            [0.02,  1.02, 0.00],  # Urbanization Dynamics
-            [0.00, -0.01, 0.99],  # Water Dynamics
+            [0.98, -0.05, 0.01],  # Vegetation
+            [0.02,  1.02, 0.00],  # Urban
+            [0.00, -0.01, 0.99],  # Water
         ])
 
     def simulate(self, initial_veg: float, initial_urban: float, initial_water: float, years: int = 20):
@@ -33,7 +31,7 @@ class KoopmanDynamicsEngine:
         steps = len(timeline) - 1
         for _ in range(steps):
             next_state = np.dot(self.K_matrix, state)
-            next_state = np.clip(next_state, 0.0, 1.0) # 0-1 arasına sıkıştır
+            next_state = np.clip(next_state, 0.0, 1.0)
             state = next_state
             history.append(state.copy())
             
@@ -51,7 +49,6 @@ class RealWorldDataFetcher:
     @staticmethod
     def get_weather_data(lat: float, lon: float):
         try:
-            # Open-Meteo API (Auth gerektirmez)
             url = "https://api.open-meteo.com/v1/forecast"
             params = {
                 "latitude": lat,
@@ -62,7 +59,6 @@ class RealWorldDataFetcher:
             }
             response = requests.get(url, params=params)
             data = response.json()
-            
             current = data.get("current_weather", {})
             return {
                 "status": "success",
@@ -82,7 +78,7 @@ tools_list = [
         "function_declarations": [
             {
                 "name": "run_koopman_simulation",
-                "description": "Belirli bir bölge için Yeşillik, Betonlaşma ve Su oranlarını ABICore dinamikleriyle 20 yıllık simüle eder.",
+                "description": "Belirli bir bölge için Yeşillik, Betonlaşma ve Su oranlarını AGICore dinamikleriyle 20 yıllık simüle eder.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
@@ -110,34 +106,71 @@ tools_list = [
 ]
 
 # ==============================================================================
-# 3. STREAMLIT UI & LOGIC
+# 3. HELPER: SMART MODEL SELECTOR
 # ==============================================================================
 
-st.set_page_config(page_title="GAIA PRIME (NBI v30)", layout="wide")
+def get_best_available_model(api_key):
+    """Kullanıcının hesabındaki çalışan en iyi modeli otomatik bulur."""
+    genai.configure(api_key=api_key)
+    try:
+        # Mevcut modelleri listele
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # Öncelik sırasına göre kontrol et
+        preferences = [
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-flash-001",
+            "models/gemini-1.5-pro",
+            "models/gemini-pro"
+        ]
+        
+        for pref in preferences:
+            if pref in available_models:
+                return pref.replace("models/", "") # 'models/' öneki olmadan döndür
+        
+        # Hiçbiri yoksa listedeki ilkini al
+        if available_models:
+            return available_models[0].replace("models/", "")
+            
+    except Exception as e:
+        return "gemini-1.5-flash" # Hata olursa varsayılanı dene
+    
+    return "gemini-1.5-flash"
+
+# ==============================================================================
+# 4. STREAMLIT UI & LOGIC
+# ==============================================================================
+
+st.set_page_config(page_title="GAIA PRIME (AGICore)", layout="wide")
 
 st.title("🌱 GAIA PRIME")
-st.markdown("### Powered by ABICore™ Architecture")
+st.markdown("### Powered by AGICore™ Architecture")
 st.caption("Doğa Tabanlı Zeka (NBI) ve Gerçek Zamanlı Veri Orkestrasyonu")
 
 # Sidebar: Ayarlar
 with st.sidebar:
     st.header("Sistem Ayarları")
     api_key = st.text_input("Google Gemini API Key", type="password")
-    st.info("API Key'iniz sadece bu oturumda kullanılır.")
     
-    st.subheader("Simülasyon Modu")
-    quality_preset = st.select_slider("ABICore İşlem Kalitesi", options=["ECO", "BALANCED", "HIGH", "ULTRA"], value="HIGH")
-    
-    st.divider()
-    st.markdown("**ABICore Durumu:** 🟢 Aktif")
+    selected_model_name = None
+    if api_key:
+        with st.spinner("Model bağlantısı kontrol ediliyor..."):
+            selected_model_name = get_best_available_model(api_key)
+        st.success(f"Bağlanılan Model: **{selected_model_name}**")
+    else:
+        st.info("API Key giriniz.")
 
-# Session State Başlatma
+    st.subheader("Simülasyon Modu")
+    quality_preset = st.select_slider("AGICore İşlem Kalitesi", options=["ECO", "HIGH", "ULTRA"], value="HIGH")
+    st.divider()
+    st.markdown("**AGICore Durumu:** 🟢 Aktif")
+
+# Session State
 if "messages" not in st.session_state:
     st.session_state.messages = []
-    # İlk karşılama mesajı (ABICore ismiyle)
     st.session_state.messages.append({
         "role": "model", 
-        "parts": ["Merhaba. Ben Gaia Prime. [cite_start]**ABICore** mantığıyla [cite: 6] donatılmış doğa tabanlı asistanım. Size nasıl yardımcı olabilirim?"]
+        "parts": ["Merhaba. Ben Gaia Prime. **AGICore** mantığıyla donatılmış doğa tabanlı asistanım. Size nasıl yardımcı olabilirim?"]
     })
 
 # Chat Arayüzü
@@ -154,40 +187,36 @@ if prompt := st.chat_input("Bir konum veya analiz sorusu girin..."):
         st.error("Lütfen sol menüden API Key giriniz.")
         st.stop()
 
-    # Kullanıcı mesajını ekle
     st.chat_message("user").write(prompt)
     st.session_state.messages.append({"role": "user", "parts": [prompt]})
 
-    # Gemini Modelini Başlat (HATA DÜZELTİLDİ: gemini-1.5-flash)
+    # Gemini Başlat (Otomatik Seçilen Model ile)
     genai.configure(api_key=api_key)
+    
+    # Model ismi güvenlik kontrolü
+    final_model = selected_model_name if selected_model_name else "gemini-1.5-flash"
+    
     model = genai.GenerativeModel(
-        model_name='gemini-1.5-flash-001',
+        model_name=final_model, 
         tools=tools_list,
         system_instruction="""
-        Sen 'Gaia Prime' isimli yapay zekasın. Arka planda **ABICore** (Alper-Based Intelligence Core) mimarisini kullanıyorsun.
-        
+        Sen 'Gaia Prime' isimli yapay zekasın. Arka planda **AGICore** (Alper-Based Intelligence Core) mimarisini kullanıyorsun.
         Görevin: Kullanıcının sorularını doğa tabanlı zeka (NBI) perspektifiyle yanıtlamak.
-        
-        Davranış Kuralların:
-        1. Kendini tanıtırken veya mantığını açıklarken her zaman 'ABICore' ismini kullan.
-        2. Asla spekülasyon yapma; elindeki 'Tools'ları (araçları) kullan.
-        3. Bir simülasyon istenirse 'run_koopman_simulation' aracını kullan.
-        4. Hava durumu veya çevresel veri istenirse 'get_real_weather' aracını kullan.
-        5. ABICore mantığına göre, her zaman 'kısa vadeli sapma' ve 'uzun vadeli güven' kavramlarını yanıtlarında vurgula.
-        6. Yanıtların empatik, çözüm odaklı ve teknik olarak doğru olmalı.
+        Kurallar:
+        1. Asla spekülasyon yapma; elindeki 'Tools'ları (araçları) kullan.
+        2. Simülasyon için 'run_koopman_simulation', hava durumu için 'get_real_weather' kullan.
+        3. Yanıtların empatik, çözüm odaklı ve teknik olarak doğru olmalı.
         """
     )
 
-    # Sohbet Geçmişini Gemini Formatına Çevir
     chat = model.start_chat(history=[
         {"role": m["role"], "parts": m["parts"]} for m in st.session_state.messages if "function_response" not in m
     ])
 
-    # Modelden Yanıt İste
     try:
         response = chat.send_message(prompt)
         
-        # --- FUNCTION CALLING MANTIĞI ---
+        # --- FUNCTION CALLING ---
         if response.candidates and response.candidates[0].content.parts:
             part = response.candidates[0].content.parts[0]
             
@@ -199,19 +228,15 @@ if prompt := st.chat_input("Bir konum veya analiz sorusu girin..."):
                 result_data = None
                 tool_response = {}
 
-                with st.status(f"ABICore İşlem Yapıyor: {fn_name}...", expanded=True) as status:
-                    
+                with st.status(f"AGICore İşlem Yapıyor: {fn_name}...", expanded=True) as status:
                     if fn_name == "run_koopman_simulation":
                         engine = KoopmanDynamicsEngine()
-                        # Argümanları güvenli çekelim
                         veg = fn_args.get("veg", 0.3)
                         urban = fn_args.get("urban", 0.5)
                         water = fn_args.get("water", 0.2)
-                        
                         result_data = engine.simulate(veg, urban, water)
                         tool_response = result_data
                         
-                        # Grafiği anlık çiz
                         df = pd.DataFrame({
                             "Yıl": result_data["years"],
                             "Yeşil Alan": result_data["vegetation"],
@@ -219,7 +244,7 @@ if prompt := st.chat_input("Bir konum veya analiz sorusu girin..."):
                             "Su": result_data["water"]
                         })
                         st.line_chart(df.set_index("Yıl"))
-                        status.write("ABICore Simülasyonu tamamlandı.")
+                        status.write("Simülasyon tamamlandı.")
 
                     elif fn_name == "get_real_weather":
                         lat = fn_args.get("lat")
@@ -238,20 +263,15 @@ if prompt := st.chat_input("Bir konum veya analiz sorusu girin..."):
                         response={'result': tool_response}
                     )
                 )
-                
-                # Model nihai yanıtı üretiyor
                 final_response = chat.send_message([function_response_part])
                 bot_reply = final_response.text
             else:
                 bot_reply = response.text
         else:
-            bot_reply = "ABICore şu an yanıt üretemedi. Lütfen tekrar deneyin."
+            bot_reply = "AGICore yanıt üretemedi. (API'den boş yanıt döndü)"
 
-    except NotFound:
-        bot_reply = "Model bulunamadı hatası. Lütfen kodun 'gemini-1.5-flash' kullandığından emin olun."
     except Exception as e:
-        bot_reply = f"Bir hata oluştu: {str(e)}"
+        bot_reply = f"Hata Oluştu: {str(e)} \n\n*İpucu: Sayfayı yenileyip tekrar API Key girmeyi deneyin.*"
 
-    # Yanıtı ekrana ve geçmişe yaz
     st.chat_message("model").write(bot_reply)
     st.session_state.messages.append({"role": "model", "parts": [bot_reply]})
