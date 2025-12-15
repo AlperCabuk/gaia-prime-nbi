@@ -6,7 +6,7 @@ import requests
 from datetime import datetime
 
 # ==============================================================================
-# 1. MOTORLAR (Matematik & Veri)
+# 1. MOTORLAR
 # ==============================================================================
 
 class KoopmanDynamicsEngine:
@@ -33,7 +33,7 @@ class RealWorldDataFetcher:
             return {"error": "Bağlantı hatası"}
 
 # ==============================================================================
-# 2. AYARLAR & ARAÇLAR
+# 2. AYARLAR
 # ==============================================================================
 
 st.set_page_config(page_title="GAIA PRIME", layout="wide")
@@ -53,30 +53,24 @@ tools_list = [{
     ]
 }]
 
-def get_valid_model(api_key):
-    """API Key'e uygun modeli bulur."""
-    genai.configure(api_key=api_key)
-    try:
-        # Hata riskini sıfırlamak için doğrudan flash modelini döndürüyoruz
-        # Liste çekmek bazen yetki hatası veriyor, bu en güvenlisi.
-        return "models/gemini-1.5-flash"
-    except:
-        return "models/gemini-1.5-flash"
-
 # ==============================================================================
-# 3. ARAYÜZ VE MANTIK
+# 3. ARAYÜZ
 # ==============================================================================
 
 with st.sidebar:
     st.title("GAIA PRIME")
-    st.caption("Powered by ABICore™")
+    st.caption("ABICore™ Architecture")
     api_key = st.text_input("Google API Key", type="password")
-    if api_key:
-        st.success("Sistem Aktif")
-    else:
-        st.warning("API Key Giriniz")
+    
+    # Hata durumunda kurtarıcı buton
+    if st.button("SİSTEMİ SIFIRLA / ÖNBELLEĞİ TEMİZLE", type="primary"):
+        st.session_state.messages = []
+        st.rerun()
 
-# Geçmişi Başlat (Streamlit formatında: assistant/user)
+    if api_key:
+        st.success("Sistem Hazır")
+
+# Geçmişi Başlat (Eğer yoksa)
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant", "parts": ["Merhaba. Ben Gaia Prime. ABICore mimarisiyle sorularınızı bekliyorum."]}
@@ -86,38 +80,37 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["parts"][0])
 
-# --- ANA İŞLEM ---
+# --- SOHBET MANTIĞI ---
 if prompt := st.chat_input("Bir soru sorun..."):
     if not api_key:
+        st.error("Lütfen API Key giriniz.")
         st.stop()
 
-    # Kullanıcı mesajını ekrana bas ve kaydet
+    # Kullanıcı mesajını ekle
     st.chat_message("user").write(prompt)
     st.session_state.messages.append({"role": "user", "parts": [prompt]})
 
-    # --- KRİTİK DÜZELTME: GEÇMİŞİ GEMINI FORMATINA ÇEVİR ---
-    # Streamlit 'assistant' kullanır, Gemini 'model' ister. 400 Hatası buradan çıkıyordu.
+    # --- KRİTİK DÜZELTME: GEÇMİŞİ FİLTRELE ---
+    # 1. İlk mesajı (Merhaba) API'ye gönderme (400 Hatası Çözümü).
+    # 2. Rolleri 'user' ve 'model' olarak ayarla.
     gemini_history = []
-    for m in st.session_state.messages:
+    for m in st.session_state.messages[1:]:  # [1:] ile ilk mesajı atlıyoruz!
         role = "model" if m["role"] == "assistant" else "user"
         gemini_history.append({"role": role, "parts": m["parts"]})
-    # -------------------------------------------------------
-
+    
     sys_instruction = """
     Sen Gaia Prime'sın. ABICore mimarisine sahipsin.
-    
-    1. KİMLİK: Asla "dil modeliyim" deme. "ABICore analizlerine göre..." diye başla.
-    2. HESAPLAMA: Kullanıcı simülasyon veya hava durumu isterse MUTLAKA araçları kullan.
-    3. GENEL BİLGİ: Araç yoksa (örn: sel riski, tarih), "yapamam" deme. Geniş bilgi dağarcığınla profesyonelce yanıtla.
+    1. KİMLİK: "ABICore analizlerine göre..." diye başla.
+    2. ARAÇLAR: Simülasyon veya hava durumu istenirse MUTLAKA araç kullan.
+    3. YORUM: Araç yoksa (örn: sel riski, tarih), "yapamam" deme. Bilgi dağarcığınla profesyonelce yanıtla.
     """
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("models/gemini-1.5-flash", tools=tools_list, system_instruction=sys_instruction)
+        # Model isminden 'models/' ön ekini kaldırdık (404 Hatası Çözümü)
+        model = genai.GenerativeModel("gemini-1.5-flash", tools=tools_list, system_instruction=sys_instruction)
         
-        # history parametresine düzeltilmiş listeyi veriyoruz
         chat = model.start_chat(history=gemini_history)
-        
         response = chat.send_message(prompt)
         
         # Function Calling Kontrolü
@@ -136,22 +129,15 @@ if prompt := st.chat_input("Bir soru sorun..."):
                     elif fn.name == "get_weather":
                         res = RealWorldDataFetcher.get_weather(fn.args["lat"], fn.args["lon"])
                 
-                # Sonucu geri gönder
                 final_resp = chat.send_message(genai.protos.Part(function_response=genai.protos.FunctionResponse(name=fn.name, response={'r': res})))
                 bot_text = final_resp.text
             else:
                 bot_text = response.text
         else:
-            bot_text = "Bağlantı sorunu."
+            bot_text = "Sunucudan boş yanıt döndü."
 
     except Exception as e:
-        # Hata mesajını temizle
-        err_msg = str(e)
-        if "400" in err_msg:
-            bot_text = "Lütfen sağ üstten 'Clear Cache' yapın. Eski mesaj formatı uyumsuz."
-        else:
-            bot_text = f"Hata: {err_msg}"
+        bot_text = f"Sistem Hatası: {str(e)}"
 
-    # Yanıtı kaydet ve bas
     st.chat_message("assistant").write(bot_text)
     st.session_state.messages.append({"role": "assistant", "parts": [bot_text]})
