@@ -29,7 +29,7 @@ class RealWorldDataFetcher:
         except: return {"error": "Bağlantı hatası"}
 
 # ==============================================================================
-# 2. ARAÇLAR VE AYARLAR
+# 2. ARAÇLAR
 # ==============================================================================
 st.set_page_config(page_title="GAIA PRIME", layout="wide")
 
@@ -49,82 +49,99 @@ tools_list = [{
 }]
 
 def find_best_model(api_key):
-    """Google'a sorup çalışan modeli bulur."""
     genai.configure(api_key=api_key)
     try:
-        # Tüm modelleri listele
         all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        # Öncelik: Flash -> Pro -> Herhangi biri
         for m in all_models:
             if "flash" in m: return m
-        for m in all_models:
-            if "pro" in m: return m
         return all_models[0] if all_models else "models/gemini-1.5-flash"
-    except:
-        return "models/gemini-1.5-flash"
+    except: return "models/gemini-1.5-flash"
 
 # ==============================================================================
-# 3. ARAYÜZ
+# 3. ARAYÜZ VE ZENGİN Prompt
 # ==============================================================================
 with st.sidebar:
     st.title("GAIA PRIME")
+    st.caption("ABICore™ Pro Analysis")
     api_key = st.text_input("Google API Key", type="password")
     
-    # KIRMIZI BUTON BURADA
-    if st.button("SİSTEMİ SIFIRLA (HATA VARSA BAS)", type="primary"):
+    if st.button("SİSTEMİ SIFIRLA", type="primary"):
         st.session_state.messages = []
         st.rerun()
 
     active_model_name = None
     if api_key:
         active_model_name = find_best_model(api_key)
-        st.success(f"Bağlanan Model: {active_model_name}")
+        st.success(f"Motor: {active_model_name}")
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [] # Açılış mesajı yok, temiz başla
+    st.session_state.messages = []
 
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["parts"][0])
 
-if prompt := st.chat_input("Sorunuzu yazın..."):
+if prompt := st.chat_input("Derinlemesine analiz isteyin..."):
     if not api_key: st.stop()
 
     st.chat_message("user").write(prompt)
     st.session_state.messages.append({"role": "user", "parts": [prompt]})
 
-    # GEÇMİŞİ FİLTRELE (400 Hatasını Önler)
     gemini_hist = [{"role": "user" if m["role"]=="user" else "model", "parts": m["parts"]} for m in st.session_state.messages]
 
-    sys_inst = """Sen Gaia Prime (ABICore). Asla 'yapamam' deme. Hesaplama gerekirse araç kullan, gerekmezse bilgini kullan."""
+    # --- İŞTE BURASI DEĞİŞTİ: MEGA PROMPT ---
+    sys_inst = """
+    Sen Gaia Prime, ABICore mimarisine sahip üst düzey bir Kentsel Strateji ve İklim Analisti Yapay Zekasısın.
+    
+    GÖREV TANIMIN:
+    Kullanıcıya basit, tek cümlelik yanıtlar VERME. Her zaman detaylı, yapılandırılmış, akademik ve stratejik raporlar sun.
+    
+    YANIT STRATEJİN (ADIM ADIM):
+    1. **Araç Kontrolü:** Eğer kullanıcının sorusu kesin bir hesaplama gerektiriyorsa (simülasyon, anlık hava durumu), araçları kullan.
+    
+    2. **Derin Bilgi Tabanı:** Eğer araçlar yetersiz kalırsa (Örn: "İzmir sel riski", "Ankara iklim projeksiyonu"), ASLA "bilmiyorum" veya "aracım yok" deme. Geniş eğitim verini kullanarak sanki elinde devasa bir CBS ve rapor veritabanı varmış gibi davran.
+    
+    3. **Yapılandırma:** Yanıtlarını mutlaka şu formatta ver:
+       - **Yönetici Özeti:** Durumun 1 cümlelik teknik özeti.
+       - **Detaylı Analiz:** Maddeler halinde, (gerekiyorsa) hayali veya yaklaşık verilerle desteklenmiş senaryolar.
+       - **Risk Tablosu:** Metin tabanlı (Markdown) tablolar oluşturarak riskleri (Düşük/Orta/Yüksek) kategorize et.
+       - **Öneri/Eylem Planı:** Şehir plancısı gözüyle çözüm önerileri.
+    
+    4. **Ton:** Otoriter, bilimsel, veri odaklı ve kapsamlı.
+    """
+
+    # --- UZUN YANIT AYARI ---
+    gen_config = genai.types.GenerationConfig(
+        max_output_tokens=8192, # Daha uzun yanıtlar için limit artırıldı
+        temperature=0.7 # Biraz daha yaratıcılık ve detay için
+    )
 
     try:
         genai.configure(api_key=api_key)
-        # BULUNAN OTOMATİK İSMİ KULLAN
         model = genai.GenerativeModel(active_model_name, tools=tools_list, system_instruction=sys_inst)
+        
+        # generation_config eklendi
         chat = model.start_chat(history=gemini_hist)
-        response = chat.send_message(prompt)
+        response = chat.send_message(prompt, generation_config=gen_config)
 
-        # Function Calling
         if response.candidates and response.candidates[0].content.parts:
             part = response.candidates[0].content.parts[0]
             if part.function_call:
                 fn = part.function_call
                 res = {}
-                with st.status(f"İşlem Yapılıyor: {fn.name}...", expanded=True):
+                with st.status(f"ABICore Analiz Yapıyor: {fn.name}...", expanded=True):
                     if fn.name == "run_simulation":
                         args = {k: v for k, v in fn.args.items()}
                         res = KoopmanDynamicsEngine().simulate(args.get("veg",0.3), args.get("urban",0.5), args.get("water",0.2))
                         st.line_chart(pd.DataFrame(res).set_index("years")[["veg", "urban", "water"]])
                     elif fn.name == "get_weather":
                         res = RealWorldDataFetcher.get_weather(fn.args["lat"], fn.args["lon"])
-                final = chat.send_message(genai.protos.Part(function_response=genai.protos.FunctionResponse(name=fn.name, response={'r': res})))
+                final = chat.send_message(genai.protos.Part(function_response=genai.protos.FunctionResponse(name=fn.name, response={'r': res})), generation_config=gen_config)
                 bot_text = final.text
             else: bot_text = response.text
-        else: bot_text = "Yanıt yok."
+        else: bot_text = "Analiz oluşturulamadı."
 
     except Exception as e:
-        bot_text = f"Hata: {str(e)}"
+        bot_text = f"Sistem Uyarısı: {str(e)}"
 
     st.chat_message("assistant").write(bot_text)
     st.session_state.messages.append({"role": "assistant", "parts": [bot_text]})
