@@ -161,7 +161,7 @@ if prompt := st.chat_input("Bir konum veya analiz sorusu girin..."):
     # Gemini Modelini Başlat (HATA DÜZELTİLDİ: gemini-1.5-flash)
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(
-        model_name='gemini-1.5-flash', 
+        model_name='gemini-1.5-flash-001',
         tools=tools_list,
         system_instruction="""
         Sen 'Gaia Prime' isimli yapay zekasın. Arka planda **ABICore** (Alper-Based Intelligence Core) mimarisini kullanıyorsun.
